@@ -1,1 +1,35 @@
+# Data
 data/
+*.bin
+*.pcd
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ML artifacts
+*.pth
+*.pt
+*.ckpt
+*.pkl
+*.index
+wandb/
+runs/
+mlruns/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
