@@ -1,4 +1,11 @@
 # edgeminer
+
+## Training curves
+
+![Recall@5 climbing from 6% to 97% over 16 epochs](notebooks/figures/val_recall@5.png)
+
+InfoNCE loss converges smoothly, with held-out Recall@5 lifting from random-baseline (6.25%) to 97.5% by epoch 16.
+
 ## Results
 
 Trained on **nuScenes mini** (10 scenes, 404 keyframes, 80/20 train/val split). All metrics measured on the 80-sample held-out set.
