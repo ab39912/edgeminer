@@ -197,7 +197,7 @@ Each notebook is designed to run in Google Colab with a free T4 GPU.
 - [x] Multimodal dual encoder with contrastive training
 - [x] FAISS retrieval with cross-modal queries
 - [x] Active learning pipeline with Failure Atlas
-- [ ] FastAPI inference service with INT8 quantization
+- [x] FastAPI inference service with INT8 quantization
 - [ ] Streamlit monitoring dashboard (embedding drift, detector confidence over time)
 - [ ] Scale to full nuScenes (1000 scenes)
 
