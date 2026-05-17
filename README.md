@@ -113,6 +113,39 @@ Identifying long-tail failure modes is one of the hardest problems in autonomous
 
 ---
 
+## Production Deployment
+
+### Inference benchmark
+
+EdgeMiner inference is benchmarked in three modes on CPU (50 synthetic
+1600×900 inputs, batch size 16). Cosine similarity to FP32 is measured
+on a held-out reference image and serves as the accuracy proxy.
+
+| Mode | Throughput (img/s) | ms/img | Speedup | Cosine sim to FP32 |
+|------|-------------------:|-------:|--------:|-------------------:|
+| FP32 baseline | 3.35 | 298.67 | 1.00× | 1.0000 |
+| Dynamic INT8 | 4.42 | 226.42 | 1.32× | 0.7135 |
+| Static INT8 | 3.71 | 269.36 | **1.11×** | **0.9993** |
+
+### Quantization analysis
+
+The benchmark surfaces a key tradeoff between the two quantization
+strategies. **Dynamic INT8** is faster (1.32×) but degrades the embedding
+quality significantly (cosine 0.71 vs FP32), making it unsuitable for
+retrieval workloads. **Static INT8** with proper calibration is slower
+(1.11×) but preserves cosine similarity above 0.999, retaining retrieval
+quality.
+
+For this project, static quantization is the production-ready mode.
+Dynamic quantization would require additional work — narrower activation
+clipping, per-layer sensitivity analysis, or QAT (quantization-aware
+training) — to recover accuracy.
+
+*Benchmark run on Colab free-tier CPU; absolute numbers will scale up
+on production hardware. Relative speedups generally transfer.*
+
+---
+
 ## Tech stack
 
 - **PyTorch** — model training and inference
