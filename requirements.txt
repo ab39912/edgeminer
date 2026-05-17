@@ -1,0 +1,26 @@
+# EdgeMiner runtime dependencies.
+# Pin versions where stability matters; leave loose where flexibility is fine.
+
+# Core ML
+torch>=2.0,<2.5
+torchvision>=0.15
+numpy>=1.24,<2.0
+Pillow>=10.0
+
+# Retrieval
+faiss-cpu>=1.7.4
+
+# API
+fastapi>=0.104
+uvicorn[standard]>=0.24
+python-multipart>=0.0.6
+pydantic>=2.0
+
+# Frontend (optional - separate file for Streamlit-only deploys)
+streamlit>=1.28
+requests>=2.31
+
+# Testing
+pytest>=7.4
+pytest-asyncio>=0.21
+httpx>=0.25
