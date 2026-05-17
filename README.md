@@ -56,3 +56,19 @@ This is the foundational workflow for edge-case mining at scale: given one examp
 | LiDAR → LiDAR | Find scenes with similar 3D structure |
 | Image → LiDAR | Cross-modal: retrieve LiDAR scans from a camera query |
 | LiDAR → Image | Cross-modal: retrieve images from a point cloud query |
+
+## Active Learning: The Failure Atlas
+
+EdgeMiner closes the active learning loop: a pretrained YOLOv8-large detector is run over every scene, per-scene uncertainty is scored via a composite of mean/min confidence, low-confidence ratio, class entropy, and missed-detection rate. The top-10% most uncertain scenes are flagged for labeling.
+
+![UMAP projection of all scenes colored by detector uncertainty](notebooks/figures/failure_atlas.png)
+
+*UMAP-projected embeddings of all 404 nuScenes mini scenes. Color = composite uncertainty score. Red dots are the top-10% most uncertain scenes — they cluster systematically rather than scattering, indicating structured failure modes rather than random model noise.*
+
+### Mined Failure Cluster
+
+![Night intersection failure cluster](notebooks/figures/cluster_1.png)
+
+A representative failure cluster mined automatically by the pipeline. **Anchor** (left): a night intersection scene with lens flare; the detector produces 24 boxes but at low confidence (composite uncertainty = 0.73). **Cluster members**: four visually near-identical scenes retrieved via FAISS (similarity > 0.96), representing the "lens-flare-at-night" failure mode. This is one labeling batch — find one failure, automatically surface the similar failures, label them together for the next training round.
+
+> **Why this matters:** Identifying long-tail failure modes is the single hardest problem in autonomous driving development. Production systems like Motional's Omnitag tackle this at petabyte scale. EdgeMiner demonstrates the same workflow end-to-end on a 10-scene dataset, validating the methodology before scaling.
