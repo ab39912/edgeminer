@@ -1,74 +1,180 @@
-# edgeminer
+# EdgeMiner
 
-## Training curves
+A multimodal data mining tool for autonomous driving. Given a dataset of driving scenes, EdgeMiner finds the rare ones that are likely to break a perception model — the scenes worth labeling next.
 
-![Recall@5 climbing from 6% to 97% over 16 epochs](notebooks/figures/val_recall@5.png)
+Built on [nuScenes](https://www.nuscenes.org/), the autonomous driving dataset originally released by Motional.
 
-InfoNCE loss converges smoothly, with held-out Recall@5 lifting from random-baseline (6.25%) to 97.5% by epoch 16.
+---
+
+## Why this project exists
+
+Autonomous vehicles improve by training on the scenes their current model gets wrong. Finding those scenes is hard. Random sampling wastes labeling budget on easy cases. Manual review doesn't scale. Production teams build internal tools to solve this problem at the petabyte scale.
+
+EdgeMiner is a small, end-to-end exploration of how those tools work: train a multimodal encoder, build a fast search index over the embeddings, score every scene by detector uncertainty, and surface the failures as labeling batches.
+
+---
+
+## What it does
+
+EdgeMiner runs in three connected stages.
+
+**1. Learn a joint embedding space.** A dual encoder is trained with contrastive learning to produce 256-dimensional embeddings of camera images and LiDAR point clouds, where matching pairs from the same scene end up close together.
+
+**2. Search for similar scenes.** A FAISS index over the embeddings supports four query types: image-to-image, LiDAR-to-LiDAR, image-to-LiDAR, and LiDAR-to-image.
+
+**3. Find the failures.** A pretrained YOLOv8 detector runs over the dataset. Each scene gets an uncertainty score. The most uncertain scenes are flagged, and FAISS pulls in their visually similar neighbors. The result is a set of "failure clusters" — small batches of related hard cases ready for labeling.
+
+---
 
 ## Results
 
-Trained on **nuScenes mini** (10 scenes, 404 keyframes, 80/20 train/val split). All metrics measured on the 80-sample held-out set.
+All numbers below are measured on the **nuScenes mini** split (10 scenes, 404 keyframes, 80/20 train/val split).
 
-| Metric | Random baseline | EdgeMiner | Improvement |
-|---|---|---|---|
-| Recall@1 | 1.25% | **53.75%** | 43× |
-| Recall@5 | 6.25% | **97.50%** | 16× |
-| Recall@10 | 12.50% | **100.00%** | 8× |
-| Val loss (InfoNCE) | 4.39 | **1.11** | — |
+### Retrieval quality
 
-Training: 16 epochs, ~25 min on a single T4 GPU. Best checkpoint saved by val Recall@5.
+The trained dual encoder lifts retrieval performance far above random chance.
 
-> **Note on scale:** these metrics reflect performance on the 10-scene mini split, which contains some visually similar consecutive keyframes. Full nuScenes (1000 scenes) would present harder retrieval distractors. Results here demonstrate that the dual encoder learns a meaningful joint embedding space; scaling to full nuScenes is part of the project roadmap.
+| Metric | Random baseline | EdgeMiner |
+|---|---|---|
+| Recall@1 | 1.25% | **53.75%** |
+| Recall@5 | 6.25% | **97.50%** |
+| Recall@10 | 12.50% | **100.00%** |
+| InfoNCE loss | 4.39 | **1.11** |
 
+Training took 16 epochs (about 25 minutes on a single T4 GPU). The best checkpoint is saved automatically by validation Recall@5.
 
-## Retrieval Demo
+![Validation Recall@5 over training](notebooks/figures/val_recall@5.png)
 
-EdgeMiner supports four types of similarity search:
+*Recall@5 climbs steadily from the random-baseline level (~6%) to 97.5% over 16 epochs.*
 
-| Query type | Use case |
-|---|---|
-| Image → Image | Find scenes that look like a target scene |
-| LiDAR → LiDAR | Find scenes with similar 3D structure |
-| Image → LiDAR | Cross-modal: retrieve LiDAR scans matching a camera query |
-| LiDAR → Image | Cross-modal: retrieve images matching a point cloud query |
+**A note on the numbers.** Mini contains many consecutive keyframes from the same drive, so retrievals often pull in temporally adjacent scenes (which is what you want — the model has learned that consecutive scenes are similar). On the full 1000-scene nuScenes split, retrieval becomes harder because there are more distractors. The results here demonstrate that the embedding space is meaningful; scaling up is part of the roadmap.
 
-![Top-5 visually similar scenes retrieved by EdgeMiner](notebooks/figures/query_type.png)
+---
 
-*Top-5 visually similar scenes for a sample query. The trained dual encoder retrieves adjacent keyframes from the same driving sequence (similarity ~0.6+) followed by visually related scenes from other parts of the dataset.*
+## Demo 1: Retrieval
 
+Below is a query scene and its top-5 retrievals from EdgeMiner.
 
-### Night Scene Mining
+![Retrieval demo](notebooks/figures/query_type.png)
 
-![Night driving scenes retrieved from a single query](notebooks/figures/lidar_1.png)
+The model picks up adjacent keyframes from the same drive first (high similarity), then visually related scenes from elsewhere in the dataset.
 
-**Query:** Scene 317 — *"Night, big street, bus stop, high speed, construction vehicle"*
+### Night-scene mining
 
-EdgeMiner's top-5 retrievals are all night urban driving scenes with consistent lighting, road type, and composition. The dual encoder learned night-time as a distinct semantic mode without explicit lighting labels — purely from contrastive pretraining on paired camera-LiDAR data.
+This example is more interesting because it shows the model retrieving across scenes that aren't temporally adjacent.
 
-This is the foundational workflow for edge-case mining at scale: given one example of a rare scenario (e.g., construction vehicle present at night), retrieve all similar instances from the dataset for labeling and retraining.
+![Night scene retrieval](notebooks/figures/lidar_1.png)
 
-### Supported Query Types
+The query is scene 317, described in the nuScenes metadata as *"Night, big street, bus stop, high speed, construction vehicle."* All five retrievals are night-time urban driving scenes with similar lighting and road type, even though none of these features were labeled. The model learned "night driving" as a distinct cluster purely from contrastive training on paired camera and LiDAR data.
 
-| Query type | Use case |
-|---|---|
-| Image → Image | Find scenes that look visually similar |
-| LiDAR → LiDAR | Find scenes with similar 3D structure |
-| Image → LiDAR | Cross-modal: retrieve LiDAR scans from a camera query |
-| LiDAR → Image | Cross-modal: retrieve images from a point cloud query |
+This is the workflow that matters for production data mining: given one example of a rare scenario, surface the others automatically.
 
-## Active Learning: The Failure Atlas
+---
 
-EdgeMiner closes the active learning loop: a pretrained YOLOv8-large detector is run over every scene, per-scene uncertainty is scored via a composite of mean/min confidence, low-confidence ratio, class entropy, and missed-detection rate. The top-10% most uncertain scenes are flagged for labeling.
+## Demo 2: Active learning and the Failure Atlas
 
-![UMAP projection of all scenes colored by detector uncertainty](notebooks/figures/failure_atlas.png)
+The retrieval system answers "find similar scenes." The active learning layer answers "find scenes the model is uncertain about, *then* find similar ones."
 
-*UMAP-projected embeddings of all 404 nuScenes mini scenes. Color = composite uncertainty score. Red dots are the top-10% most uncertain scenes — they cluster systematically rather than scattering, indicating structured failure modes rather than random model noise.*
+For each scene, EdgeMiner computes a composite uncertainty score from five signals:
 
-### Mined Failure Cluster
+- Mean detector confidence
+- Minimum detector confidence
+- Ratio of low-confidence detections
+- Class-distribution entropy
+- Whether the detector found anything at all
 
-![Night intersection failure cluster](notebooks/figures/cluster_1.png)
+Scenes in the top 10% by uncertainty are flagged as failure candidates.
 
-A representative failure cluster mined automatically by the pipeline. **Anchor** (left): a night intersection scene with lens flare; the detector produces 24 boxes but at low confidence (composite uncertainty = 0.73). **Cluster members**: four visually near-identical scenes retrieved via FAISS (similarity > 0.96), representing the "lens-flare-at-night" failure mode. This is one labeling batch — find one failure, automatically surface the similar failures, label them together for the next training round.
+### The Failure Atlas
 
-> **Why this matters:** Identifying long-tail failure modes is the single hardest problem in autonomous driving development. Production systems like Motional's Omnitag tackle this at petabyte scale. EdgeMiner demonstrates the same workflow end-to-end on a 10-scene dataset, validating the methodology before scaling.
+To visualize the structure of these failures, the 256-dimensional embeddings are projected into 2D with UMAP and colored by uncertainty.
+
+![UMAP of all scenes colored by uncertainty](notebooks/figures/failure_atlas.png)
+
+Two things are visible here. First, the embedding space has structure — scenes cluster by type. Second, the high-uncertainty scenes (red) don't scatter randomly across the plot. They group together in specific regions, which means the detector's failures are **systematic**, not noise. Different regions correspond to different failure modes.
+
+### A mined failure cluster
+
+Here is one of the failure clusters the pipeline surfaced automatically.
+
+![Mined night intersection cluster](notebooks/figures/cluster_1.png)
+
+The leftmost image is the anchor — a night intersection with heavy lens flare. The detector produced 24 boxes here but at low confidence (composite uncertainty score of 0.73). The four images to the right are the FAISS retrievals: visually near-identical night intersections (similarity above 0.96 for each).
+
+This is one labeling batch. A labeler reviewing this cluster handles five related hard cases at once instead of finding each one in isolation.
+
+Lens flare at night is a known failure mode for COCO-trained object detectors. The pipeline surfaced it without any prior knowledge that this mode existed.
+
+---
+
+## Why this matters
+
+Identifying long-tail failure modes is one of the hardest problems in autonomous driving development. Production systems like Motional's Omnitag tackle this at petabyte scale. EdgeMiner is a small, public version of the same workflow, validated end-to-end on a 10-scene dataset.
+
+---
+
+## Tech stack
+
+- **PyTorch** — model training and inference
+- **DINOv2** (ViT-S/14) — pretrained image encoder, frozen backbone with a trainable projection head
+- **PointNet** — LiDAR encoder, trained end-to-end
+- **FAISS** — exact nearest-neighbor search over embeddings
+- **YOLOv8-large** (Ultralytics) — pretrained detector for uncertainty scoring
+- **UMAP** — 2D projection of the embedding space
+- **nuScenes devkit** — dataset loading
+- **TensorBoard** — training metrics and curves
+
+---
+
+## Project structure
+
+```
+edgeminer/
+├── src/
+│   ├── data/                 # nuScenes loader
+│   ├── models/               # Dual encoder (DINOv2 + PointNet)
+│   ├── training/             # InfoNCE loss + training loop
+│   ├── retrieval/            # Embedding extraction + FAISS index
+│   └── active_learning/      # Detector + uncertainty + Failure Atlas
+├── notebooks/                # End-to-end demo notebooks for each phase
+│   └── figures/              # Result images used in this README
+└── README.md
+```
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/<your-username>/edgeminer.git
+cd edgeminer
+pip install -r requirements.txt
+```
+
+1. Register at [nuscenes.org](https://www.nuscenes.org/) and download `v1.0-mini.tgz` (about 3.9 GB)
+2. Extract to `data/nuscenes/`
+3. Run the notebooks in order: `01_explore_nuscenes.ipynb` → `02_retrieval_demo.ipynb` → `03_failure_atlas.ipynb`
+
+Each notebook is designed to run in Google Colab with a free T4 GPU.
+
+---
+
+## Roadmap
+
+- [x] Multimodal dual encoder with contrastive training
+- [x] FAISS retrieval with cross-modal queries
+- [x] Active learning pipeline with Failure Atlas
+- [ ] FastAPI inference service with INT8 quantization
+- [ ] Streamlit monitoring dashboard (embedding drift, detector confidence over time)
+- [ ] Scale to full nuScenes (1000 scenes)
+
+---
+
+## Author
+
+**Ameya Bhalerao** — M.S. Applied Data Science, Syracuse University.
+Portfolio: [bhalerao-ameya.vercel.app](https://bhalerao-ameya.vercel.app)
+
+## License
+
+MIT
